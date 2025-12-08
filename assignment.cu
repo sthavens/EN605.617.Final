@@ -42,7 +42,11 @@ struct CompareNode {
 struct HuffmanHeaderEntry {
     uint8_t symbol;          // the character value
     uint8_t code_length;     // number of bits in the code (0 if unused)
+<<<<<<< HEAD
     uint32_t code_bits;      // store up to 32 bits for simplicity (for larger codes, adjust accordingly)
+=======
+    uint8_t bits[32];      // store up to 32 bits for simplicity (for larger codes, adjust accordingly)
+>>>>>>> d78c323 (Finished adding basic code)
 };
 
 __global__ void count_characters(char* input, unsigned int* counts, size_t length) {
@@ -279,6 +283,7 @@ __host__ int process_file(char* input) {
 	CUDA_CHECK(cudaMemcpy(host_output, device_output_buffer, output_bytes, cudaMemcpyDeviceToHost));
 
 	HuffmanHeaderEntry header[256];
+<<<<<<< HEAD
 	for (int i = 0; i < 256; i++) {
 		header[i].symbol = (uint8_t)i;
 		header[i].code_length = (uint8_t)character_codes[i].length;
@@ -290,11 +295,34 @@ __host__ int process_file(char* input) {
 			}
 		}
 		header[i].code_bits = bits;
+=======
+
+	for (int i = 0; i < 256; i++) {
+		header[i].symbol = (uint8_t)i;
+		header[i].code_length = (uint8_t)character_codes[i].length;
+		memset(header[i].bits, 0, 32);
+
+		for (int j = 0; j < character_codes[i].length; j++) {
+			if (character_codes[i].bits[j]) {
+				size_t byte_index = j / 8;
+				size_t bit_index  = j % 8;
+				header[i].bits[byte_index] |= (1u << bit_index);
+			}
+		}
+>>>>>>> d78c323 (Finished adding basic code)
 	}
 
 	char out_filename[1024];
 	snprintf(out_filename, sizeof(out_filename), "%s.output", input);
 	FILE* out = fopen(out_filename, "wb");
+<<<<<<< HEAD
+=======
+	if (!out) {
+		fprintf(stderr, "Error opening output file\n");
+		return -1;
+	}
+
+>>>>>>> d78c323 (Finished adding basic code)
 	fwrite(header, sizeof(HuffmanHeaderEntry), 256, out);
 	fwrite(host_output, 1, output_bytes, out);
 	fclose(out);
