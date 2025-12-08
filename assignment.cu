@@ -57,56 +57,6 @@ __global__ void count_characters(char* input, unsigned int* counts, size_t lengt
 	}
 }
 
-__host__ int build_huffman_tree(unsigned int* counts, HuffmanCode* codes) {
-
-	std::priority_queue<Node*, std::vector<Node*>, CompareNode> priorityQueue;
-	// For now, we're just using fixed codes for demonstration purposes. Final version of project will have actual trees.
-	int codes_generated = 0;
-	for (unsigned int i = 0; i < 256; i++) {
-		if (counts[i] > 0) {
-			priorityQueue.push(new Node((unsigned char)i, counts[i]));
-			codes_generated++;
-		}
-	}
-
-	if (codes_generated == 0) {
-		// Edge case: no characters present
-		return 0;
-	}
-
-	if (codes_generated == 1) {
-		bool path[256];
-		Node* only_node = priorityQueue.top();
-		codes[only_node->character].length = 1;
-		memset(codes[only_node->character].bits, 0, 256);
-		codes[only_node->character].bits[0] = false;
-		return 1;
-	}
-
-	while (priorityQueue.size() > 1) {
-		codes_generated++;
-		Node* left = priorityQueue.top();
-		priorityQueue.pop();
-		Node* right = priorityQueue.top();
-		priorityQueue.pop();
-
-		Node* parent = new Node(0, left->frequency + right->frequency, left, right);
-		priorityQueue.push(parent);
-	}
-
-	Node* root = priorityQueue.top();
-
-	bool path[256] = {0};
-	for (int i = 0; i < 256; i++) {
-		codes[i].length = 0;
-		memset(codes[i].bits, 0, 256);
-	}
-	build_codes_recursive(root, path, 0, codes);
-	free_tree(root);
-	return codes_generated;
-
-}
-
 __host__ void build_codes_recursive(Node* node, bool path[], int depth, HuffmanCode codes[256]) {
 	if (!node) {
 		fprintf(stderr, "Error: No huffman codes were produced.");
@@ -137,6 +87,55 @@ __host__ void free_tree(Node* node) {
 	free_tree(node->left);
 	free_tree(node->right);
 	delete node;
+}
+
+__host__ int build_huffman_tree(unsigned int* counts, HuffmanCode* codes) {
+
+	std::priority_queue<Node*, std::vector<Node*>, CompareNode> priorityQueue;
+	// For now, we're just using fixed codes for demonstration purposes. Final version of project will have actual trees.
+	int codes_generated = 0;
+	for (unsigned int i = 0; i < 256; i++) {
+		if (counts[i] > 0) {
+			priorityQueue.push(new Node((unsigned char)i, counts[i]));
+			codes_generated++;
+		}
+	}
+
+	if (codes_generated == 0) {
+		// Edge case: no characters present
+		return 0;
+	}
+
+	if (codes_generated == 1) {
+		Node* only_node = priorityQueue.top();
+		codes[only_node->character].length = 1;
+		memset(codes[only_node->character].bits, 0, 256);
+		codes[only_node->character].bits[0] = false;
+		return 1;
+	}
+
+	while (priorityQueue.size() > 1) {
+		codes_generated++;
+		Node* left = priorityQueue.top();
+		priorityQueue.pop();
+		Node* right = priorityQueue.top();
+		priorityQueue.pop();
+
+		Node* parent = new Node(0, left->frequency + right->frequency, left, right);
+		priorityQueue.push(parent);
+	}
+
+	Node* root = priorityQueue.top();
+
+	bool path[256] = {0};
+	for (int i = 0; i < 256; i++) {
+		codes[i].length = 0;
+		memset(codes[i].bits, 0, 256);
+	}
+	build_codes_recursive(root, path, 0, codes);
+	free_tree(root);
+	return codes_generated;
+
 }
 
 __global__ void compress_data(char* input, uint32_t* output, HuffmanCode* codes, unsigned long input_length, unsigned long long* output_length) {
@@ -355,9 +354,6 @@ __host__ int process_file(char* input) {
 
 int main(int argc, char** argv)
 {
-	// read command line arguments
-	int totalThreads = (1 << 20);
-	int blockSize = 256;
 
 	if (argc != 2) {
 		printf("Please provide only 1 argument: the filename\n");
