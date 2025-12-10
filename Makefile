@@ -65,16 +65,51 @@ clean:
 # Data generator
 ###################################
 # Usage:
-#   make generate SIZES="4k 8k 32m" NAME=prefix COMP=0.6
+#   make generate SIZES="4k 8k 32m" COMP=0.6
 #   make generate SIZES="1g"
 #
 # Variables:
 #   SIZES = list of sizes to generate (required)
-#   NAME  = optional filename prefix
-#   COMP  = compressibility (0.0–1.0)
+#   COMP  = compressibility (0.0–1.0, optional, default=0)
 #
 generate:
 ifndef SIZES
 	$(error You must specify SIZES="4k 8k 32m ..." )
 endif
-	$(PYTHON) $(GEN_SCRIPT) $(SIZES) $(if $(NAME),--name $(NAME)) $(if $(COMP),--compressibility $(COMP))
+	$(PYTHON) $(GEN_SCRIPT) $(SIZES) $(if $(COMP),--compressibility $(COMP))
+
+###################################
+# Run and time GPU & CPU versions
+###################################
+# Usage: make run_test
+#
+run_test:
+	@echo "==== Running GPU version ===="
+	@for f in *.txt; do \
+		echo "Processing $$f..."; \
+		start=$$(date +%s.%N); \
+		./$(CUDA_TARGET) "$$f"; \
+		end=$$(date +%s.%N); \
+		time=$$(echo "$$end - $$start" | bc); \
+		size_in=$$(stat -c%s "$$f"); \
+		size_out=$$(stat -c%s "$$f.output"); \
+		ratio=$$(echo "scale=2; $$size_out/$$size_in" | bc); \
+		echo "Time: $$time sec, Compression ratio: $$ratio"; \
+	done
+	@echo "Cleaning .txt.output files..."
+	@rm -f *.txt.output
+	@echo "==== Running CPU version ===="
+	@for f in *.txt; do \
+		echo "Processing $$f..."; \
+		start=$$(date +%s.%N); \
+		./$(CPU_TARGET) compress "$$f"; \
+		end=$$(date +%s.%N); \
+		time=$$(echo "$$end - $$start" | bc); \
+		size_in=$$(stat -c%s "$$f"); \
+		size_out=$$(stat -c%s "$$f.output"); \
+		ratio=$$(echo "scale=2; $$size_out/$$size_in" | bc); \
+		echo "Time: $$time sec, Compression ratio: $$ratio"; \
+	done
+	@echo "Cleaning .txt.output files..."
+	@rm -f *.txt.output
+	
