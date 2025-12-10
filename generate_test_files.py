@@ -80,30 +80,30 @@ def write_file(size_bytes, filename, compressibility):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python random_gen.py <size1> <size2> ... [--compress N]")
-        print("Examples:")
-        print("  python random_gen.py 4k 8m")
-        print("  python random_gen.py 1g --compress 70")
-        return
+    import sys
+    import multiprocessing as mp
+    import random, os
 
     args = sys.argv[1:]
 
     # Default compressibility
     compressibility = 0
 
-    if "--compress" in args:
-        idx = args.index("--compress")
-        compressibility = int(args[idx + 1])
-        if not (0 <= compressibility <= 100):
-            raise ValueError("Compressibility must be between 0 and 100.")
-        args = args[:idx]  # strip --compress and its value
+    # Check for optional --compressibility
+    if "--compressibility" in args:
+        idx = args.index("--compressibility")
+        compressibility = float(args[idx + 1]) * 100  # convert 0.0–1.0 to 0–100
+        # Remove the option and value from args
+        args = args[:idx] + args[idx + 2:]
 
+    # Remaining args are sizes
     sizes = args
-    jobs = []
+    if not sizes:
+        raise ValueError("No sizes specified!")
 
+    jobs = []
     for s in sizes:
-        size_bytes = parse_size(s)
+        size_bytes = parse_size(s)   # now only real sizes remain
         filename = f"{s}.txt"
         jobs.append((size_bytes, filename))
 

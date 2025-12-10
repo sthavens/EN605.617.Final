@@ -20,6 +20,11 @@ struct HuffmanCode {
 	unsigned long length; // actual length of the code in bits - allows for very large files to be read in.
 };
 
+struct GenericCode {
+	bool* bits;
+	unsigned long length;
+};
+
 struct Node {
 	unsigned char character;
 	unsigned int frequency;
@@ -42,11 +47,7 @@ struct CompareNode {
 struct HuffmanHeaderEntry {
     uint8_t symbol;          // the character value
     uint8_t code_length;     // number of bits in the code (0 if unused)
-<<<<<<< HEAD
-    uint32_t code_bits;      // store up to 32 bits for simplicity (for larger codes, adjust accordingly)
-=======
     uint8_t bits[32];      // store up to 32 bits for simplicity (for larger codes, adjust accordingly)
->>>>>>> d78c323 (Finished adding basic code)
 };
 
 __global__ void count_characters(char* input, unsigned int* counts, size_t length) {
@@ -139,23 +140,20 @@ __host__ int build_huffman_tree(unsigned int* counts, HuffmanCode* codes) {
 }
 
 __global__ void compress_data(char* input, uint32_t* output, HuffmanCode* codes, unsigned long input_length, unsigned long long* output_length) {
-	size_t threadId = threadIdx.x + blockIdx.x * blockDim.x;
-	size_t stride = blockDim.x * gridDim.x;
-
-	for (size_t i = threadId; i < input_length; i += stride) {
-		const HuffmanCode& code = codes[(unsigned char) input[i]];
-		unsigned long code_length = code.length;
-
-		// Reserving a space for this particular code
-		unsigned long long start_index = atomicAdd(output_length, (unsigned long long) code_length);
-
-		for (unsigned long j = 0; j < code_length; j++) {
-			bool bit = code.bits[j];
-			if (bit) {
-				unsigned long long bit_offset = start_index + j;
-				unsigned long long byte_index = bit_offset >> 5;
-				unsigned int bit_in_byte = bit_offset & 31;
-				unsigned int mask = 1u << bit_in_byte;
+	size_t threadId = threadIdx.x + blockIdx.x * blockDim.x; 
+	size_t stride = blockDim.x * gridDim.x; 
+	
+	for (size_t i = threadId; i < input_length; i += stride) { 
+		const HuffmanCode& code = codes[(unsigned char) input[i]]; 
+		unsigned long code_length = code.length; // Reserving a space for this particular code 
+		unsigned long long start_index = atomicAdd(output_length, (unsigned long long) code_length); 
+		
+		for (unsigned long j = 0; j < code_length; j++) { 
+			bool bit = code.bits[j]; if (bit) { 
+				unsigned long long bit_offset = start_index + j; 
+				unsigned long long byte_index = bit_offset >> 5; 
+				unsigned int bit_in_byte = bit_offset & 31; 
+				unsigned int mask = 1u << bit_in_byte; 
 				atomicOr(&output[byte_index], mask);
 			}
 		}
@@ -211,6 +209,7 @@ __host__ int process_file(char* input) {
 	}
 
 	fseek(input_file, 0, SEEK_END);
+	rewind(input_file);
 	size_t read_bytes = fread(host_buffer, 1, BUFFER_SIZE, input_file);
 	size_t length = 0;
 	while (read_bytes > 0) {
@@ -223,10 +222,12 @@ __host__ int process_file(char* input) {
 	
 	cudaStreamWaitEvent(stream, copied, 0);
 
-	encrypt_data<<<num_threads / THREADS_PER_BLOCK, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, (char*) device_buffer, length);
+	size_t num_blocks = (num_threads + THREADS_PER_BLOCK - 1) / THREADS_PER_BLOCK;
+
+	encrypt_data<<<num_blocks, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, (char*) device_buffer, length);
 	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaDeviceSynchronize());
-	count_characters<<<num_threads / THREADS_PER_BLOCK, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, device_character_counts, length);
+	count_characters<<<num_blocks, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, device_character_counts, length);
 	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaDeviceSynchronize());
 	cudaEventRecord(counted, stream);
@@ -262,7 +263,7 @@ __host__ int process_file(char* input) {
 	size_t num_uints = (size_t)((max_bits + 31) >> 5);
 	CUDA_CHECK(cudaMalloc(&device_output_buffer, sizeof(uint32_t) * num_uints));
 	CUDA_CHECK(cudaMemset(device_output_buffer, 0, sizeof(uint32_t) * num_uints));
-	compress_data<<<num_threads / THREADS_PER_BLOCK, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, device_output_buffer, device_character_codes, length, device_output_length);
+	compress_data<<<num_blocks, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, device_output_buffer, device_character_codes, length, device_output_length);
 	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaDeviceSynchronize());
 	
@@ -282,19 +283,6 @@ __host__ int process_file(char* input) {
 	CUDA_CHECK(cudaMemcpy(host_output, device_output_buffer, output_bytes, cudaMemcpyDeviceToHost));
 
 	HuffmanHeaderEntry header[256];
-<<<<<<< HEAD
-	for (int i = 0; i < 256; i++) {
-		header[i].symbol = (uint8_t)i;
-		header[i].code_length = (uint8_t)character_codes[i].length;
-		
-		uint32_t bits = 0;
-		for (int j = 0; j < character_codes[i].length && j < 32; j++) {
-			if (character_codes[i].bits[j]) {
-				bits |= (1u << j);
-			}
-		}
-		header[i].code_bits = bits;
-=======
 
 	for (int i = 0; i < 256; i++) {
 		header[i].symbol = (uint8_t)i;
@@ -308,20 +296,15 @@ __host__ int process_file(char* input) {
 				header[i].bits[byte_index] |= (1u << bit_index);
 			}
 		}
->>>>>>> d78c323 (Finished adding basic code)
 	}
 
 	char out_filename[1024];
 	snprintf(out_filename, sizeof(out_filename), "%s.output", input);
 	FILE* out = fopen(out_filename, "wb");
-<<<<<<< HEAD
-=======
 	if (!out) {
 		fprintf(stderr, "Error opening output file\n");
 		return -1;
 	}
-
->>>>>>> d78c323 (Finished adding basic code)
 	fwrite(header, sizeof(HuffmanHeaderEntry), 256, out);
 	fwrite(host_output, 1, output_bytes, out);
 	fclose(out);
