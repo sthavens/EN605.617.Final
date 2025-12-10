@@ -139,84 +139,25 @@ __host__ int build_huffman_tree(unsigned int* counts, HuffmanCode* codes) {
 
 }
 
-__global__ void compress_data(char* input, uint32_t* output, HuffmanCode* codes, unsigned long input_length, unsigned long long* output_length, GenericCode* temp_array_storage) {
-	size_t threadId = threadIdx.x + blockIdx.x * blockDim.x;
-	size_t stride = blockDim.x * gridDim.x;
-	size_t start_stride_id = 0;
-
-	for (size_t i = threadId; i < input_length; i += stride) {
-		size_t local_index = threadId - start_stride_id;
-		temp_array_storage[local_index].bits = nullptr;
-		temp_array_storage[local_index].length = 0;
-
-        // --- MAP phase ---
-        // Each thread sets its pointer if within current stride
-        if (i < input_length) {
-            HuffmanCode hc = codes[(unsigned char) input[i]];
-            bool* bits_copy = (bool*) malloc(sizeof(bool) * hc.length);
-			for (unsigned long b = 0; b < hc.length; b++) {
-				bits_copy[b] = hc.bits[b];
+__global__ void compress_data(char* input, uint32_t* output, HuffmanCode* codes, unsigned long input_length, unsigned long long* output_length) {
+	size_t threadId = threadIdx.x + blockIdx.x * blockDim.x; 
+	size_t stride = blockDim.x * gridDim.x; 
+	
+	for (size_t i = threadId; i < input_length; i += stride) { 
+		const HuffmanCode& code = codes[(unsigned char) input[i]]; 
+		unsigned long code_length = code.length; // Reserving a space for this particular code 
+		unsigned long long start_index = atomicAdd(output_length, (unsigned long long) code_length); 
+		
+		for (unsigned long j = 0; j < code_length; j++) { 
+			bool bit = code.bits[j]; if (bit) { 
+				unsigned long long bit_offset = start_index + j; 
+				unsigned long long byte_index = bit_offset >> 5; 
+				unsigned int bit_in_byte = bit_offset & 31; 
+				unsigned int mask = 1u << bit_in_byte; 
+				atomicOr(&output[byte_index], mask);
 			}
-			temp_array_storage[local_index].bits = bits_copy;
-			temp_array_storage[local_index].length = hc.length;
-        } 
-        __syncthreads(); // ensure all temp_array_storage is populated
-
-		size_t num_items = min(input_length - start_stride_id, stride);
-
-		for (size_t step = 1; step < num_items; step *= 2) {
-			size_t idx = 2 * step * local_index;
-
-		// Only threads with a valid left participate
-		if (idx < num_items) {
-			size_t right_idx = idx + step;
-
-			// Only concatenate if a "right" exists
-			if (right_idx < num_items) {
-				GenericCode left = temp_array_storage[idx];
-				GenericCode right = temp_array_storage[right_idx];
-
-				// Allocate new array for left + right
-				bool* concat_bits = (bool*) malloc(sizeof(bool) * (left.length + right.length));
-
-				// Copy left bits
-				for (size_t b = 0; b < left.length; b++)
-					concat_bits[b] = left.bits[b];
-
-				// Copy right bits
-				for (size_t b = 0; b < right.length; b++)
-					concat_bits[left.length + b] = right.bits[b];
-
-				// Overwrite left with concatenation
-				temp_array_storage[idx].bits = concat_bits;
-				temp_array_storage[idx].length = left.length + right.length;
-
-			} 
-			// If there is no right, do NOT allocate anything. Left stays as-is.
 		}
-
-    	__syncthreads(); // synchronize after each step
-
-		if (local_index == 0 && num_items > 0) {
-			GenericCode result = temp_array_storage[0];
-
-			for (size_t b = 0; b < result.length; b++) {
-				unsigned long long bit_offset = *output_length + b;
-				unsigned long long word_index = bit_offset >> 5;
-				unsigned int bit_in_word = bit_offset & 31;
-				unsigned int mask = 1u << bit_in_word;
-				if (result.bits[b]) {
-					output[word_index] |= mask;
-				}
-			}
-
-			*output_length += result.length; // in bits
-		}
-
-
 	}
-	start_stride_id += stride;
-}
 }
 
 __global__ void encrypt_data(char* input, char* output, size_t length) {
@@ -322,10 +263,7 @@ __host__ int process_file(char* input) {
 	size_t num_uints = (size_t)((max_bits + 31) >> 5);
 	CUDA_CHECK(cudaMalloc(&device_output_buffer, sizeof(uint32_t) * num_uints));
 	CUDA_CHECK(cudaMemset(device_output_buffer, 0, sizeof(uint32_t) * num_uints));
-	GenericCode* temp_array_storage;
-	size_t stride_size = THREADS_PER_BLOCK * num_blocks; // using same calculation as in compress_data kernel
-	CUDA_CHECK(cudaMalloc(&temp_array_storage, sizeof(HuffmanCode*) * stride_size));
-	compress_data<<<num_blocks, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, device_output_buffer, device_character_codes, length, device_output_length, temp_array_storage);
+	compress_data<<<num_blocks, THREADS_PER_BLOCK, 0, stream>>>((char*) device_buffer, device_output_buffer, device_character_codes, length, device_output_length);
 	CUDA_CHECK(cudaGetLastError());
 	CUDA_CHECK(cudaDeviceSynchronize());
 	
@@ -384,7 +322,6 @@ __host__ int process_file(char* input) {
 	cudaFree(device_output_length);
 	cudaFree(device_character_codes);
 	cudaFree(device_output_buffer);
-	cudaFree(temp_array_storage);
 
 	// Destroy stream and events
 	cudaStreamDestroy(stream);
